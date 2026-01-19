@@ -57,11 +57,14 @@ async function downloadAudio(youtubeUrl, videoId) {
 
   const args = [
     "--no-playlist",
-    "-f", "bestaudio",
+    "-f", "bestaudio/best",
     "-x",
     "--audio-format", "mp3",
     "--audio-quality", "0",
     "--no-progress",
+    "--extractor-args", "youtube:player_client=ios,web",
+    "--no-check-certificates",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "-o", outputTemplate,
   ]
 
