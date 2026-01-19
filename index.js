@@ -1,5 +1,5 @@
 const express = require("express")
-const { createClient } = require("@supabase/supabase-js")
+const { Storage } = require("@google-cloud/storage")
 const { spawn } = require("child_process")
 const fs = require("fs/promises")
 const path = require("path")
@@ -10,14 +10,14 @@ const PORT = process.env.PORT || 8080
 const RUN_SECRET = process.env.ASR_WORKER_SECRET || ""
 const RUN_SECRET_HEADER = process.env.ASR_WORKER_HEADER || "x-run-secret"
 
-const SUPABASE_URL = process.env.SUPABASE_URL || ""
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
-const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || ""
+const GCS_BUCKET = process.env.GCS_BUCKET || ""
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY || ""
 const ASR_WEBHOOK_URL = process.env.ASR_WEBHOOK_URL || ""
 const ASR_WEBHOOK_SECRET = process.env.ASR_WEBHOOK_SECRET || ""
 const ASR_WEBHOOK_HEADER = process.env.ASR_WEBHOOK_HEADER || "x-asr-webhook-secret"
+
+const WEBSHARE_PROXY_URL = process.env.WEBSHARE_PROXY_URL || ""
 
 const parsedTtl = Number.parseInt(process.env.SIGNED_URL_TTL_SECONDS || "86400", 10)
 const SIGNED_URL_TTL_SECONDS = Number.isFinite(parsedTtl) ? parsedTtl : 86400
@@ -63,8 +63,14 @@ async function downloadAudio(youtubeUrl, videoId) {
     "--audio-quality", "0",
     "--no-progress",
     "-o", outputTemplate,
-    youtubeUrl,
   ]
+
+  // Add proxy if configured
+  if (WEBSHARE_PROXY_URL) {
+    args.push("--proxy", WEBSHARE_PROXY_URL)
+  }
+
+  args.push(youtubeUrl)
 
   await runCommand("yt-dlp", args)
 
@@ -80,34 +86,27 @@ async function downloadAudio(youtubeUrl, videoId) {
   }
 }
 
-async function uploadAudio(supabase, filePath, videoId) {
-  const buffer = await fs.readFile(filePath)
+async function uploadAudio(storage, filePath, videoId) {
   const safeVideoId = sanitizeId(videoId)
   const objectPath = `asr/${safeVideoId}/${crypto.randomUUID()}.mp3`
 
-  const { error: uploadError } = await supabase.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .upload(objectPath, buffer, {
-      contentType: "audio/mpeg",
-      upsert: true,
-    })
+  const bucket = storage.bucket(GCS_BUCKET)
+  const file = bucket.file(objectPath)
 
-  if (uploadError) {
-    throw new Error(`Supabase upload failed: ${uploadError.message}`)
-  }
+  await bucket.upload(filePath, {
+    destination: objectPath,
+    contentType: "audio/mpeg",
+  })
 
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS)
-
-  if (signedError || !signedData?.signedUrl) {
-    throw new Error(`Signed URL failed: ${signedError?.message || "missing signedUrl"}`)
-  }
+  const [signedUrl] = await file.getSignedUrl({
+    action: "read",
+    expires: Date.now() + SIGNED_URL_TTL_SECONDS * 1000,
+  })
 
   return {
-    audio_url: signedData.signedUrl,
+    audio_url: signedUrl,
     audio_path: objectPath,
-    audio_bucket: SUPABASE_STORAGE_BUCKET,
+    audio_bucket: GCS_BUCKET,
   }
 }
 
@@ -145,11 +144,10 @@ async function submitToAssemblyAI(audioUrl) {
   return data.id
 }
 
-async function cleanupStorage(supabase, audioInfo) {
+async function cleanupStorage(storage, audioInfo) {
   if (!audioInfo?.audio_bucket || !audioInfo?.audio_path) return
-  await supabase.storage
-    .from(audioInfo.audio_bucket)
-    .remove([audioInfo.audio_path])
+  const bucket = storage.bucket(audioInfo.audio_bucket)
+  await bucket.file(audioInfo.audio_path).delete()
 }
 
 const app = express()
@@ -168,9 +166,7 @@ app.post("/process-asr", async (req, res) => {
       }
     }
 
-    requireEnv("SUPABASE_URL", SUPABASE_URL)
-    requireEnv("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY)
-    requireEnv("SUPABASE_STORAGE_BUCKET", SUPABASE_STORAGE_BUCKET)
+    requireEnv("GCS_BUCKET", GCS_BUCKET)
     requireEnv("ASSEMBLYAI_API_KEY", ASSEMBLYAI_API_KEY)
     requireEnv("ASR_WEBHOOK_URL", ASR_WEBHOOK_URL)
 
@@ -179,9 +175,7 @@ app.post("/process-asr", async (req, res) => {
       return res.status(400).json({ error: "Missing youtube_url or video_id" })
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false },
-    })
+    const storage = new Storage()
 
     let tempDir = null
     let audioInfo = null
@@ -189,7 +183,7 @@ app.post("/process-asr", async (req, res) => {
     try {
       const download = await downloadAudio(youtubeUrl, videoId)
       tempDir = download.tempDir
-      audioInfo = await uploadAudio(supabase, download.filePath, videoId)
+      audioInfo = await uploadAudio(storage, download.filePath, videoId)
 
       const externalId = await submitToAssemblyAI(audioInfo.audio_url)
 
@@ -202,7 +196,7 @@ app.post("/process-asr", async (req, res) => {
     } catch (error) {
       if (audioInfo) {
         try {
-          await cleanupStorage(supabase, audioInfo)
+          await cleanupStorage(storage, audioInfo)
         } catch (cleanupError) {
           console.warn("Failed to cleanup audio after error", cleanupError)
         }
