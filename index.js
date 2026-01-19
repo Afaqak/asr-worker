@@ -62,10 +62,9 @@ async function downloadAudio(youtubeUrl, videoId) {
     "--audio-format", "mp3",
     "--audio-quality", "0",
     "--no-progress",
-    "--extractor-args", "youtube:player_client=tv,default",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "--add-header", "Referer:https://www.youtube.com/",
     "--no-check-certificates",
-    "--no-warnings",
-    "--ignore-errors",
     "-o", outputTemplate,
   ]
 
