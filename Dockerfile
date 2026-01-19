@@ -5,7 +5,9 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     curl \
-  && pip3 install --no-cache-dir --break-system-packages -U "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz" requests \
+    git \
+  && pip3 install --no-cache-dir --break-system-packages requests \
+  && pip3 install --no-cache-dir --break-system-packages "yt-dlp[default] @ https://github.com/bashonly/yt-dlp/archive/refs/heads/sabr.zip" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
