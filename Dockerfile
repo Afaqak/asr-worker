@@ -5,9 +5,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     curl \
-    unzip \
-  && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
-  && pip3 install --no-cache-dir --break-system-packages -U yt-dlp requests \
+  && pip3 install --no-cache-dir --break-system-packages -U "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz" requests \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
