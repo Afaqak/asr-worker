@@ -1,22 +1,12 @@
-FROM node:20-slim
+FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    curl \
-    git \
-  && pip3 install --no-cache-dir --break-system-packages requests \
-  && pip3 install --no-cache-dir --break-system-packages "yt-dlp[default] @ https://github.com/coletdjnz/yt-dlp-dev/archive/refs/heads/feat/youtube/sabr.zip" \
-  && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg (needed for audio conversion)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies
+RUN pip install yt-dlp google-cloud-storage flask gunicorn
 
 WORKDIR /app
+COPY app.py .
 
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
-
-COPY . .
-
-ENV NODE_ENV=production
-
-CMD ["npm", "start"]
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
