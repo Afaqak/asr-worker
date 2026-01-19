@@ -1,5 +1,6 @@
 import os
 import tempfile
+import glob
 from flask import Flask, request, jsonify
 from google.cloud import storage
 import yt_dlp
@@ -30,7 +31,8 @@ def download_audio():
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = {
-                'format': 'bestaudio/best',
+                # More flexible format selection
+                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]/best',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -45,6 +47,7 @@ def download_audio():
                 'nocheckcertificate': True,
                 'socket_timeout': 60,
                 'extractor_retries': 3,
+                'noplaylist': True,
                 # Anti-bot detection settings
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -54,8 +57,7 @@ def download_audio():
                 },
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
-                        'player_skip': ['webpage', 'configs'],
+                        'player_client': ['ios', 'android', 'web'],
                     }
                 },
             }
@@ -70,11 +72,16 @@ def download_audio():
                 duration = info.get('duration', 0)
                 channel = info.get('channel', 'Unknown')
             
-            audio_file = f'{tmpdir}/{video_id}.mp3'
+            # Find the mp3 file (handles different source extensions)
+            audio_files = glob.glob(f'{tmpdir}/{video_id}.mp3')
+            if not audio_files:
+                # Check if conversion happened
+                audio_files = glob.glob(f'{tmpdir}/*.mp3')
             
-            if not os.path.exists(audio_file):
-                return jsonify({'error': 'Audio extraction failed'}), 500
+            if not audio_files:
+                return jsonify({'error': 'Audio extraction failed - no mp3 file created'}), 500
             
+            audio_file = audio_files[0]
             file_size = os.path.getsize(audio_file)
             
             storage_client = get_storage_client()
@@ -128,7 +135,7 @@ def get_video_info():
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
+                    'player_client': ['ios', 'android', 'web'],
                 }
             },
         }
@@ -145,6 +152,53 @@ def get_video_info():
                 'view_count': info.get('view_count'),
                 'upload_date': info.get('upload_date'),
                 'thumbnail': info.get('thumbnail'),
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/formats', methods=['POST'])
+def list_formats():
+    """List available formats for a video"""
+    data = request.json
+    video_url = data.get('url')
+    
+    if not video_url:
+        return jsonify({'error': 'No URL provided'}), 400
+    
+    try:
+        ydl_opts = {
+            'skip_download': True,
+            'geo_bypass': True,
+            'listformats': False,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'android', 'web'],
+                }
+            },
+        }
+        if PROXY_URL:
+            ydl_opts['proxy'] = PROXY_URL
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            formats = []
+            for f in info.get('formats', []):
+                formats.append({
+                    'format_id': f.get('format_id'),
+                    'ext': f.get('ext'),
+                    'resolution': f.get('resolution'),
+                    'filesize': f.get('filesize'),
+                    'acodec': f.get('acodec'),
+                    'vcodec': f.get('vcodec'),
+                })
+            return jsonify({
+                'video_id': info['id'],
+                'title': info.get('title'),
+                'formats': formats
             })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -212,6 +266,7 @@ def index():
         'endpoints': {
             'POST /download': 'Download single video as audio',
             'POST /info': 'Get video info without downloading',
+            'POST /formats': 'List available formats for a video',
             'GET /list': 'List all audio files in bucket',
             'DELETE /delete/<video_id>': 'Delete an audio file',
             'GET /health': 'Health check'
