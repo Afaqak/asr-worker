@@ -62,9 +62,12 @@ async function downloadAudio(youtubeUrl, videoId) {
     "--audio-format", "mp3",
     "--audio-quality", "0",
     "--no-progress",
-    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "--extractor-args", "youtube:player_client=tv,default",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "--add-header", "Referer:https://www.youtube.com/",
     "--no-check-certificates",
+    "--no-warnings",
+    "--retries", "3",
     "-o", outputTemplate,
   ]
 
@@ -78,7 +81,7 @@ async function downloadAudio(youtubeUrl, videoId) {
   await runCommand("yt-dlp", args)
 
   const files = await fs.readdir(tempDir)
-  const audioFile = files.find((file) => file.endsWith(".mp3")) || files[0]
+  const audioFile = files.find((file) => file.endsWith(".mp3") || file.endsWith(".m4a") || file.endsWith(".webm")) || files[0]
   if (!audioFile) {
     throw new Error("yt-dlp did not produce an audio file")
   }
@@ -91,7 +94,8 @@ async function downloadAudio(youtubeUrl, videoId) {
 
 async function uploadAudio(storage, filePath, videoId) {
   const safeVideoId = sanitizeId(videoId)
-  const objectPath = `asr/${safeVideoId}/${crypto.randomUUID()}.mp3`
+  const ext = path.extname(filePath) || ".mp3"
+  const objectPath = `asr/${safeVideoId}/${crypto.randomUUID()}${ext}`
 
   const bucket = storage.bucket(GCS_BUCKET)
   const file = bucket.file(objectPath)
