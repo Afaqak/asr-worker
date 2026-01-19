@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
   && pip3 install --no-cache-dir --break-system-packages requests \
-  && pip3 install --no-cache-dir --break-system-packages "yt-dlp[default] @ https://github.com/bashonly/yt-dlp/archive/refs/heads/sabr.zip" \
+  && pip3 install --no-cache-dir --break-system-packages "yt-dlp[default] @ https://github.com/coletdjnz/yt-dlp-dev/archive/refs/heads/feat/youtube/sabr.zip" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
