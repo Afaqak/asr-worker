@@ -1,5 +1,4 @@
 flask==3.0.0
 gunicorn==21.2.0
-yt-dlp>=2025.05.22
 google-cloud-storage==2.14.0
 bgutil-ytdlp-pot-provider
