@@ -34,7 +34,7 @@ def get_ydl_opts(tmpdir=None):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
         },
-        # Use bgutil POT provider
+        # Use bgutil POT provider with mweb client
         'extractor_args': {
             'youtube': {
                 'player_client': ['default', 'mweb'],
@@ -69,7 +69,8 @@ def download_audio():
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = get_ydl_opts(tmpdir)
-            ydl_opts['format'] = 'bestaudio/best[height<=720]/best'
+            # Try multiple format options
+            ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best'
             ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -166,6 +167,7 @@ def list_formats():
     try:
         ydl_opts = get_ydl_opts()
         ydl_opts['skip_download'] = True
+        ydl_opts['listformats'] = False
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -178,10 +180,12 @@ def list_formats():
                     'filesize': f.get('filesize'),
                     'acodec': f.get('acodec'),
                     'vcodec': f.get('vcodec'),
+                    'format_note': f.get('format_note'),
                 })
             return jsonify({
                 'video_id': info['id'],
                 'title': info.get('title'),
+                'format_count': len(formats),
                 'formats': formats
             })
     except Exception as e:
