@@ -9,11 +9,49 @@ app = Flask(__name__)
 
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 PROXY_URL = os.environ.get('PROXY_URL')
+POT_PROVIDER_URL = os.environ.get('POT_PROVIDER_URL', 'http://127.0.0.1:4416')
 
 
 def get_storage_client():
     """Get GCS client"""
     return storage.Client()
+
+
+def get_ydl_opts(tmpdir=None):
+    """Get yt-dlp options with POT provider for YouTube"""
+    opts = {
+        'retries': 5,
+        'fragment_retries': 5,
+        'ignoreerrors': False,
+        'geo_bypass': True,
+        'geo_bypass_country': 'US',
+        'nocheckcertificate': True,
+        'socket_timeout': 60,
+        'extractor_retries': 3,
+        'noplaylist': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        },
+        # Use bgutil POT provider
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['default', 'mweb'],
+            },
+            'youtubepot-bgutilhttp': {
+                'base_url': [POT_PROVIDER_URL],
+            }
+        },
+    }
+    
+    if tmpdir:
+        opts['outtmpl'] = f'{tmpdir}/%(id)s.%(ext)s'
+    
+    if PROXY_URL:
+        opts['proxy'] = PROXY_URL
+    
+    return opts
 
 
 @app.route('/download', methods=['POST'])
@@ -30,42 +68,13 @@ def download_audio():
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            ydl_opts = {
-                # Use pre-combined formats (workaround for 403 errors)
-                'format': 'best[height<=720]/best[height<=1080]/bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'outtmpl': f'{tmpdir}/%(id)s.%(ext)s',
-                'retries': 5,
-                'fragment_retries': 5,
-                'ignoreerrors': False,
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                'nocheckcertificate': True,
-                'socket_timeout': 60,
-                'extractor_retries': 3,
-                'noplaylist': True,
-                # Anti-bot detection settings
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-us,en;q=0.5',
-                    'Sec-Fetch-Mode': 'navigate',
-                },
-                # YouTube 403 workaround - use actual player JS version
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web'],
-                        'player_js_version': ['actual'],
-                    }
-                },
-            }
-            
-            if PROXY_URL:
-                ydl_opts['proxy'] = PROXY_URL
+            ydl_opts = get_ydl_opts(tmpdir)
+            ydl_opts['format'] = 'bestaudio/best[height<=720]/best'
+            ydl_opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
@@ -74,7 +83,7 @@ def download_audio():
                 duration = info.get('duration', 0)
                 channel = info.get('channel', 'Unknown')
             
-            # Find the mp3 file (handles different source extensions)
+            # Find the mp3 file
             audio_files = glob.glob(f'{tmpdir}/{video_id}.mp3')
             if not audio_files:
                 audio_files = glob.glob(f'{tmpdir}/*.mp3')
@@ -127,21 +136,8 @@ def get_video_info():
         return jsonify({'error': 'No URL provided'}), 400
     
     try:
-        ydl_opts = {
-            'skip_download': True,
-            'geo_bypass': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                    'player_js_version': ['actual'],
-                }
-            },
-        }
-        if PROXY_URL:
-            ydl_opts['proxy'] = PROXY_URL
+        ydl_opts = get_ydl_opts()
+        ydl_opts['skip_download'] = True
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -168,21 +164,8 @@ def list_formats():
         return jsonify({'error': 'No URL provided'}), 400
     
     try:
-        ydl_opts = {
-            'skip_download': True,
-            'geo_bypass': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                    'player_js_version': ['actual'],
-                }
-            },
-        }
-        if PROXY_URL:
-            ydl_opts['proxy'] = PROXY_URL
+        ydl_opts = get_ydl_opts()
+        ydl_opts['skip_download'] = True
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -256,7 +239,8 @@ def health():
     return jsonify({
         'status': 'healthy',
         'bucket_configured': bool(BUCKET_NAME),
-        'proxy_configured': bool(PROXY_URL)
+        'proxy_configured': bool(PROXY_URL),
+        'pot_provider_url': POT_PROVIDER_URL
     })
 
 
