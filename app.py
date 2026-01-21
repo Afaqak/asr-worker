@@ -31,8 +31,8 @@ def download_audio():
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = {
-                # More flexible format selection
-                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]/best',
+                # Use pre-combined formats (workaround for 403 errors)
+                'format': 'best[height<=720]/best[height<=1080]/bestaudio/best',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -55,9 +55,11 @@ def download_audio():
                     'Accept-Language': 'en-us,en;q=0.5',
                     'Sec-Fetch-Mode': 'navigate',
                 },
+                # YouTube 403 workaround - use actual player JS version
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['ios', 'android', 'web'],
+                        'player_client': ['web'],
+                        'player_js_version': ['actual'],
                     }
                 },
             }
@@ -75,7 +77,6 @@ def download_audio():
             # Find the mp3 file (handles different source extensions)
             audio_files = glob.glob(f'{tmpdir}/{video_id}.mp3')
             if not audio_files:
-                # Check if conversion happened
                 audio_files = glob.glob(f'{tmpdir}/*.mp3')
             
             if not audio_files:
@@ -97,7 +98,6 @@ def download_audio():
             
             blob.upload_from_filename(audio_file, content_type='audio/mpeg')
             
-            # Public URL (no signing needed)
             public_url = f'https://storage.googleapis.com/{BUCKET_NAME}/audio/{video_id}.mp3'
             
             return jsonify({
@@ -135,7 +135,8 @@ def get_video_info():
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios', 'android', 'web'],
+                    'player_client': ['web'],
+                    'player_js_version': ['actual'],
                 }
             },
         }
@@ -170,13 +171,13 @@ def list_formats():
         ydl_opts = {
             'skip_download': True,
             'geo_bypass': True,
-            'listformats': False,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios', 'android', 'web'],
+                    'player_client': ['web'],
+                    'player_js_version': ['actual'],
                 }
             },
         }
