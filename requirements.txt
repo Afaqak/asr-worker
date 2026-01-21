@@ -1,4 +1,4 @@
 flask==3.0.0
 gunicorn==21.2.0
-yt-dlp==2024.12.23
+yt-dlp>=2025.01.15
 google-cloud-storage==2.14.0
