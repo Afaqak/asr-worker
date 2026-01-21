@@ -19,8 +19,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install yt-dlp nightly version
+# Install yt-dlp nightly version with default dependencies
 RUN pip install --no-cache-dir -U --pre "yt-dlp[default]"
+
+# Install bgutil POT provider plugin
+RUN pip install --no-cache-dir -U bgutil-ytdlp-pot-provider
+
+# Verify plugin installation
+RUN python -c "import yt_dlp; print('yt-dlp version:', yt_dlp.version.__version__)"
 
 # Copy application code
 COPY app.py .
