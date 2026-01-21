@@ -10,6 +10,10 @@ app = Flask(__name__)
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 PROXY_URL = os.environ.get('PROXY_URL')
 POT_PROVIDER_URL = os.environ.get('POT_PROVIDER_URL', 'http://127.0.0.1:4416')
+COOKIES_FILE = os.environ.get('COOKIES_FILE', 'cookies.txt')
+
+# Global cookies path
+COOKIES_PATH = None
 
 
 def get_storage_client():
@@ -17,8 +21,37 @@ def get_storage_client():
     return storage.Client()
 
 
+def download_cookies():
+    """Download cookies file from GCS bucket"""
+    global COOKIES_PATH
+    
+    if not BUCKET_NAME:
+        return None
+    
+    try:
+        storage_client = get_storage_client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(COOKIES_FILE)
+        
+        if blob.exists():
+            COOKIES_PATH = '/tmp/cookies.txt'
+            blob.download_to_filename(COOKIES_PATH)
+            print(f"Downloaded cookies from gs://{BUCKET_NAME}/{COOKIES_FILE}")
+            return COOKIES_PATH
+        else:
+            print(f"No cookies file found at gs://{BUCKET_NAME}/{COOKIES_FILE}")
+            return None
+    except Exception as e:
+        print(f"Error downloading cookies: {e}")
+        return None
+
+
+# Download cookies on startup
+download_cookies()
+
+
 def get_ydl_opts(tmpdir=None):
-    """Get yt-dlp options with POT provider for YouTube"""
+    """Get yt-dlp options with POT provider"""
     opts = {
         'retries': 5,
         'fragment_retries': 5,
@@ -29,16 +62,18 @@ def get_ydl_opts(tmpdir=None):
         'socket_timeout': 60,
         'extractor_retries': 3,
         'noplaylist': True,
+        'verbose': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
         },
-        # Use bgutil POT provider with mweb client
+        # Correct extractor args format for bgutil POT provider
         'extractor_args': {
             'youtube': {
                 'player_client': ['default', 'mweb'],
             },
+            # The plugin key format: youtubepot-bgutilhttp
             'youtubepot-bgutilhttp': {
                 'base_url': [POT_PROVIDER_URL],
             }
@@ -50,6 +85,10 @@ def get_ydl_opts(tmpdir=None):
     
     if PROXY_URL:
         opts['proxy'] = PROXY_URL
+    
+    # Use cookies if available
+    if COOKIES_PATH and os.path.exists(COOKIES_PATH):
+        opts['cookiefile'] = COOKIES_PATH
     
     return opts
 
@@ -69,7 +108,6 @@ def download_audio():
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = get_ydl_opts(tmpdir)
-            # Try multiple format options
             ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best'
             ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
@@ -127,6 +165,16 @@ def download_audio():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/refresh-cookies', methods=['POST'])
+def refresh_cookies():
+    """Re-download cookies from GCS"""
+    result = download_cookies()
+    if result:
+        return jsonify({'success': True, 'message': 'Cookies refreshed'})
+    else:
+        return jsonify({'success': False, 'message': 'No cookies file found in bucket'}), 404
+
+
 @app.route('/info', methods=['POST'])
 def get_video_info():
     """Get video info without downloading"""
@@ -167,7 +215,6 @@ def list_formats():
     try:
         ydl_opts = get_ydl_opts()
         ydl_opts['skip_download'] = True
-        ydl_opts['listformats'] = False
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -180,7 +227,6 @@ def list_formats():
                     'filesize': f.get('filesize'),
                     'acodec': f.get('acodec'),
                     'vcodec': f.get('vcodec'),
-                    'format_note': f.get('format_note'),
                 })
             return jsonify({
                 'video_id': info['id'],
@@ -240,11 +286,13 @@ def delete_audio(video_id):
 
 @app.route('/health', methods=['GET'])
 def health():
+    cookies_available = COOKIES_PATH and os.path.exists(COOKIES_PATH)
     return jsonify({
         'status': 'healthy',
         'bucket_configured': bool(BUCKET_NAME),
         'proxy_configured': bool(PROXY_URL),
-        'pot_provider_url': POT_PROVIDER_URL
+        'pot_provider_url': POT_PROVIDER_URL,
+        'cookies_available': cookies_available
     })
 
 
@@ -256,6 +304,7 @@ def index():
             'POST /download': 'Download single video as audio',
             'POST /info': 'Get video info without downloading',
             'POST /formats': 'List available formats for a video',
+            'POST /refresh-cookies': 'Refresh cookies from GCS bucket',
             'GET /list': 'List all audio files in bucket',
             'DELETE /delete/<video_id>': 'Delete an audio file',
             'GET /health': 'Health check'
